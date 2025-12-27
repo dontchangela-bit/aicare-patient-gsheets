@@ -160,10 +160,6 @@ def render_registration():
     </div>
     """, unsafe_allow_html=True)
     
-    # 除錯模式開關（隱藏）
-    with st.expander("🔧 進階設定", expanded=False):
-        st.session_state.debug_mode = st.checkbox("啟用除錯模式", value=st.session_state.debug_mode)
-    
     tab1, tab2 = st.tabs(["📝 首次使用", "🔑 我已註冊"])
     
     # === 首次使用（註冊）===
@@ -188,7 +184,27 @@ def render_registration():
                 gender = st.selectbox("性別", ["男", "女"])
             
             st.markdown("---")
-            consent = st.checkbox("我同意參與本研究並接受系統使用條款")
+            
+            # 同意條款說明
+            st.markdown("""
+            ##### 📋 研究說明與同意書
+            
+            本系統為**三軍總醫院「AI-CARE Lung 肺癌術後照護研究計畫」**的一部分。
+            
+            **參與內容：**
+            - 每日透過本系統回報您的健康狀況
+            - 系統會使用 AI 協助評估您的症狀
+            - 個案管理師會根據回報資料提供照護建議
+            
+            **資料保護：**
+            - 您的個人資料將依法保密
+            - 僅供醫療照護及研究分析使用
+            - 您可隨時要求退出研究
+            
+            如有任何疑問，請洽詢您的主治醫師或個案管理師。
+            """)
+            
+            consent = st.checkbox("✅ 我已閱讀並同意參與本研究計畫")
             
             submit = st.form_submit_button("✅ 註冊", use_container_width=True, type="primary")
             
@@ -202,7 +218,7 @@ def render_registration():
                 elif password != password_confirm:
                     st.error("兩次密碼輸入不一致")
                 elif not consent:
-                    st.error("請勾選同意條款")
+                    st.error("請閱讀並勾選同意參與研究計畫")
                 else:
                     # 檢查是否已註冊
                     existing = get_patient_by_phone(phone) if GSHEETS_AVAILABLE else None
