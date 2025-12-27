@@ -188,6 +188,41 @@ def get_patient_by_id(patient_id):
             return patient
     return None
 
+def generate_unique_patient_id(worksheet, phone):
+    """產生唯一的病人 ID"""
+    import random
+    import string
+    
+    phone = normalize_phone(phone)
+    
+    # 取得現有的所有 patient_id
+    existing_ids = set()
+    try:
+        records = worksheet.get_all_records()
+        existing_ids = {r.get("patient_id", "") for r in records}
+    except:
+        pass
+    
+    # 嘗試產生唯一 ID（最多嘗試 100 次）
+    for attempt in range(100):
+        if attempt == 0:
+            # 第一次嘗試：手機後4碼 + 月日 + 時分
+            patient_id = f"P{phone[-4:]}{datetime.now().strftime('%m%d%H%M')}"
+        elif attempt < 10:
+            # 後續嘗試：加入隨機數字
+            random_suffix = ''.join(random.choices(string.digits, k=3))
+            patient_id = f"P{phone[-4:]}{datetime.now().strftime('%m%d')}{random_suffix}"
+        else:
+            # 最後手段：完全隨機
+            random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+            patient_id = f"P{random_suffix}"
+        
+        if patient_id not in existing_ids:
+            return patient_id
+    
+    # 如果都失敗，用時間戳
+    return f"P{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
 def create_patient(patient_data):
     """建立新病人"""
     spreadsheet = get_spreadsheet()
@@ -197,9 +232,9 @@ def create_patient(patient_data):
     try:
         worksheet = get_or_create_worksheet(spreadsheet, "Patients", PATIENT_COLUMNS)
         
-        # 產生病人 ID
+        # 產生唯一病人 ID
         phone = normalize_phone(patient_data.get("phone", ""))
-        patient_id = f"P{phone[-4:]}{datetime.now().strftime('%m%d')}"
+        patient_id = generate_unique_patient_id(worksheet, phone)
         
         # 準備資料列
         row = [
