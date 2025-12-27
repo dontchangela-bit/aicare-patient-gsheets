@@ -134,8 +134,18 @@ def get_all_patients():
 def get_patient_by_phone(phone):
     """根據手機號碼查找病人"""
     patients = get_all_patients()
+    # 標準化輸入的手機號碼（移除前導零或轉為字串）
+    phone_str = str(phone).strip()
+    
     for patient in patients:
-        if patient.get("phone") == phone:
+        # 標準化資料庫中的手機號碼
+        db_phone = str(patient.get("phone", "")).strip()
+        
+        # 比對（支援有無前導零）
+        if db_phone == phone_str:
+            return patient
+        # 如果 Google Sheets 把 0912345678 存成 912345678（數字格式）
+        if db_phone.lstrip('0') == phone_str.lstrip('0'):
             return patient
     return None
 
