@@ -1,11 +1,11 @@
 """
-AI-CARE Lung - Google Sheets 資料管理模組（修正版）
-==================================================
+AI-CARE Lung - Google Sheets 資料管理模組（快取優化版）
+=====================================================
 
 修正內容：
-1. 手機號碼格式比對問題（支援數字/字串格式）
-2. 密碼比對問題（統一轉為字串）
-3. 增加除錯資訊
+1. 加入 Streamlit 快取機制，減少 API 呼叫
+2. 手機號碼/密碼格式標準化
+3. 唯一 patient_id 產生
 """
 
 import streamlit as st
@@ -14,6 +14,12 @@ from google.oauth2.service_account import Credentials
 import json
 from datetime import datetime
 import pandas as pd
+import time
+
+# ============================================
+# 快取設定
+# ============================================
+CACHE_TTL = 60  # 快取時間：60 秒
 
 # ============================================
 # Google Sheets 設定
@@ -45,10 +51,10 @@ INTERVENTION_COLUMNS = [
 ]
 
 # ============================================
-# 連線管理
+# 連線管理（使用快取）
 # ============================================
 
-@st.cache_resource
+@st.cache_resource(ttl=300)  # 連線快取 5 分鐘
 def get_google_sheets_connection():
     """取得 Google Sheets 連線（使用快取）"""
     try:
@@ -97,19 +103,16 @@ def get_or_create_worksheet(spreadsheet, sheet_name, columns):
     return worksheet
 
 # ============================================
-# 工具函數（修正版）
+# 工具函數
 # ============================================
 
 def normalize_phone(phone):
     """標準化手機號碼格式"""
     if phone is None:
         return ""
-    # 轉為字串並移除空白
     phone_str = str(phone).strip()
-    # 移除可能的小數點（如果被當成數字存）
     if '.' in phone_str:
         phone_str = phone_str.split('.')[0]
-    # 確保台灣手機格式（補前導零）
     if len(phone_str) == 9 and not phone_str.startswith('0'):
         phone_str = '0' + phone_str
     return phone_str
@@ -118,19 +121,22 @@ def normalize_password(password):
     """標準化密碼格式"""
     if password is None:
         return ""
-    # 轉為字串
     pwd_str = str(password).strip()
-    # 移除可能的小數點（如果被當成數字存）
     if '.' in pwd_str:
         pwd_str = pwd_str.split('.')[0]
     return pwd_str
 
+def clear_cache():
+    """清除所有快取"""
+    st.cache_data.clear()
+
 # ============================================
-# 病人資料管理
+# 病人資料管理（使用快取）
 # ============================================
 
-def get_all_patients():
-    """取得所有病人"""
+@st.cache_data(ttl=CACHE_TTL)
+def get_all_patients_cached():
+    """取得所有病人（快取版）"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
         return []
@@ -141,11 +147,9 @@ def get_all_patients():
         
         today = datetime.now().date()
         for record in records:
-            # 標準化手機和密碼格式
             record["phone"] = normalize_phone(record.get("phone"))
             record["password"] = normalize_password(record.get("password"))
             
-            # 計算術後天數
             if record.get("surgery_date"):
                 try:
                     surgery_date = datetime.strptime(str(record["surgery_date"]), "%Y-%m-%d").date()
@@ -160,21 +164,19 @@ def get_all_patients():
         st.error(f"讀取病人資料失敗: {e}")
         return []
 
+def get_all_patients():
+    """取得所有病人（外部呼叫介面）"""
+    return get_all_patients_cached()
+
 def get_patient_by_phone(phone):
-    """根據手機號碼查找病人（修正版）"""
+    """根據手機號碼查找病人"""
     patients = get_all_patients()
-    
-    # 標準化輸入的手機號碼
     input_phone = normalize_phone(phone)
     
     for patient in patients:
         db_phone = patient.get("phone", "")
-        
-        # 直接比對（已經標準化過了）
         if db_phone == input_phone:
             return patient
-        
-        # 額外比對：移除所有前導零後比對
         if db_phone.lstrip('0') == input_phone.lstrip('0') and input_phone.lstrip('0'):
             return patient
     
@@ -195,7 +197,6 @@ def generate_unique_patient_id(worksheet, phone):
     
     phone = normalize_phone(phone)
     
-    # 取得現有的所有 patient_id
     existing_ids = set()
     try:
         records = worksheet.get_all_records()
@@ -203,24 +204,19 @@ def generate_unique_patient_id(worksheet, phone):
     except:
         pass
     
-    # 嘗試產生唯一 ID（最多嘗試 100 次）
     for attempt in range(100):
         if attempt == 0:
-            # 第一次嘗試：手機後4碼 + 月日 + 時分
             patient_id = f"P{phone[-4:]}{datetime.now().strftime('%m%d%H%M')}"
         elif attempt < 10:
-            # 後續嘗試：加入隨機數字
             random_suffix = ''.join(random.choices(string.digits, k=3))
             patient_id = f"P{phone[-4:]}{datetime.now().strftime('%m%d')}{random_suffix}"
         else:
-            # 最後手段：完全隨機
             random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
             patient_id = f"P{random_suffix}"
         
         if patient_id not in existing_ids:
             return patient_id
     
-    # 如果都失敗，用時間戳
     return f"P{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
 def create_patient(patient_data):
@@ -232,16 +228,14 @@ def create_patient(patient_data):
     try:
         worksheet = get_or_create_worksheet(spreadsheet, "Patients", PATIENT_COLUMNS)
         
-        # 產生唯一病人 ID
         phone = normalize_phone(patient_data.get("phone", ""))
         patient_id = generate_unique_patient_id(worksheet, phone)
         
-        # 準備資料列
         row = [
             patient_id,
             patient_data.get("name", ""),
-            phone,  # 使用標準化後的手機號碼
-            str(patient_data.get("password", "")),  # 確保密碼是字串
+            phone,
+            str(patient_data.get("password", "")),
             patient_data.get("age", ""),
             patient_data.get("gender", ""),
             patient_data.get("surgery_type", "待設定"),
@@ -249,15 +243,19 @@ def create_patient(patient_data):
             patient_data.get("diagnosis", ""),
             patient_data.get("medical_record", ""),
             patient_data.get("status", "pending_setup"),
-            0,  # post_op_day
+            0,
             patient_data.get("consent_agreed", "Y"),
             datetime.now().isoformat(),
             datetime.now().isoformat(),
-            "",  # clinical_data
-            ""   # notes
+            "",
+            ""
         ]
         
         worksheet.append_row(row)
+        
+        # 清除快取以便下次讀取新資料
+        clear_cache()
+        
         return patient_id
     except Exception as e:
         st.error(f"建立病人失敗: {e}")
@@ -275,13 +273,15 @@ def update_patient(patient_id, updates):
         
         for idx, record in enumerate(records):
             if record.get("patient_id") == patient_id:
-                row_num = idx + 2  # +2 因為標題列和 0-based index
+                row_num = idx + 2
                 
                 for key, value in updates.items():
                     if key in PATIENT_COLUMNS:
                         col_num = PATIENT_COLUMNS.index(key) + 1
                         worksheet.update_cell(row_num, col_num, value)
                 
+                # 清除快取
+                clear_cache()
                 return True
         return False
     except Exception as e:
@@ -289,11 +289,12 @@ def update_patient(patient_id, updates):
         return False
 
 # ============================================
-# 回報紀錄管理
+# 回報紀錄管理（使用快取）
 # ============================================
 
-def get_all_reports():
-    """取得所有回報"""
+@st.cache_data(ttl=CACHE_TTL)
+def get_all_reports_cached():
+    """取得所有回報（快取版）"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
         return []
@@ -304,6 +305,10 @@ def get_all_reports():
     except Exception as e:
         st.error(f"讀取回報失敗: {e}")
         return []
+
+def get_all_reports():
+    """取得所有回報（外部呼叫介面）"""
+    return get_all_reports_cached()
 
 def get_patient_reports(patient_id):
     """取得特定病人的回報"""
@@ -340,12 +345,13 @@ def save_report(report_data):
             json.dumps(report_data.get("symptoms", {}), ensure_ascii=False),
             report_data.get("messages_count", 0),
             report_data.get("alert_level", "green"),
-            "N",  # alert_handled
-            "",   # handled_by
-            ""    # handled_at
+            "N",
+            "",
+            ""
         ]
         
         worksheet.append_row(row)
+        clear_cache()
         return report_id
     except Exception as e:
         st.error(f"儲存回報失敗: {e}")
@@ -378,6 +384,7 @@ def handle_alert(report_id, handler):
                 worksheet.update_cell(row_num, REPORT_COLUMNS.index("alert_handled") + 1, "Y")
                 worksheet.update_cell(row_num, REPORT_COLUMNS.index("handled_by") + 1, handler)
                 worksheet.update_cell(row_num, REPORT_COLUMNS.index("handled_at") + 1, datetime.now().isoformat())
+                clear_cache()
                 return True
         return False
     except Exception as e:
@@ -385,11 +392,12 @@ def handle_alert(report_id, handler):
         return False
 
 # ============================================
-# 衛教推送管理
+# 衛教推送管理（使用快取）
 # ============================================
 
-def get_education_pushes(patient_id=None):
-    """取得衛教推送紀錄"""
+@st.cache_data(ttl=CACHE_TTL)
+def get_education_pushes_cached(patient_id=None):
+    """取得衛教推送紀錄（快取版）"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
         return []
@@ -404,6 +412,10 @@ def get_education_pushes(patient_id=None):
     except Exception as e:
         st.error(f"讀取衛教紀錄失敗: {e}")
         return []
+
+def get_education_pushes(patient_id=None):
+    """取得衛教推送紀錄（外部呼叫介面）"""
+    return get_education_pushes_cached(patient_id)
 
 def push_education(push_data):
     """推送衛教"""
@@ -426,11 +438,12 @@ def push_education(push_data):
             push_data.get("push_type", "manual"),
             push_data.get("pushed_by", ""),
             datetime.now().isoformat(),
-            "",  # read_at
+            "",
             "sent"
         ]
         
         worksheet.append_row(row)
+        clear_cache()
         return push_id
     except Exception as e:
         st.error(f"推送衛教失敗: {e}")
@@ -451,6 +464,7 @@ def mark_education_read(push_id):
                 row_num = idx + 2
                 worksheet.update_cell(row_num, EDUCATION_COLUMNS.index("read_at") + 1, datetime.now().isoformat())
                 worksheet.update_cell(row_num, EDUCATION_COLUMNS.index("status") + 1, "read")
+                clear_cache()
                 return True
         return False
     except Exception as e:
@@ -458,11 +472,12 @@ def mark_education_read(push_id):
         return False
 
 # ============================================
-# 介入紀錄管理
+# 介入紀錄管理（使用快取）
 # ============================================
 
-def get_interventions(patient_id=None):
-    """取得介入紀錄"""
+@st.cache_data(ttl=CACHE_TTL)
+def get_interventions_cached(patient_id=None):
+    """取得介入紀錄（快取版）"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
         return []
@@ -477,6 +492,10 @@ def get_interventions(patient_id=None):
     except Exception as e:
         st.error(f"讀取介入紀錄失敗: {e}")
         return []
+
+def get_interventions(patient_id=None):
+    """取得介入紀錄（外部呼叫介面）"""
+    return get_interventions_cached(patient_id)
 
 def save_intervention(intervention_data):
     """儲存介入紀錄"""
@@ -503,15 +522,17 @@ def save_intervention(intervention_data):
         ]
         
         worksheet.append_row(row)
+        clear_cache()
         return intervention_id
     except Exception as e:
         st.error(f"儲存介入紀錄失敗: {e}")
         return None
 
 # ============================================
-# 統計資料
+# 統計資料（使用快取）
 # ============================================
 
+@st.cache_data(ttl=CACHE_TTL)
 def get_dashboard_stats():
     """取得儀表板統計"""
     patients = get_all_patients()
@@ -523,7 +544,7 @@ def get_dashboard_stats():
     
     stats = {
         "total_patients": len(patients),
-        "active_patients": len([p for p in patients if p.get("status") not in ["discharged"]]),
+        "active_patients": len([p for p in patients if p.get("status") not in ["discharged", "completed"]]),
         "today_reports": len(today_reports),
         "pending_alerts": len(pending_alerts),
         "red_alerts": len([a for a in pending_alerts if a.get("alert_level") == "red"]),
@@ -570,7 +591,7 @@ def debug_login(phone, password):
         phone_match = (db_phone == input_phone) or (db_phone.lstrip('0') == input_phone.lstrip('0'))
         pwd_match = (db_pwd == input_pwd)
         
-        if phone_match or db_phone[-4:] == input_phone[-4:]:  # 至少後4碼相同
+        if phone_match or db_phone[-4:] == input_phone[-4:]:
             debug_info["matches"].append({
                 "patient_id": p.get("patient_id"),
                 "name": p.get("name"),
@@ -582,3 +603,4 @@ def debug_login(phone, password):
             })
     
     return debug_info
+        
