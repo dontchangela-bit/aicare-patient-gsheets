@@ -1,9 +1,11 @@
 """
-AI-CARE Lung - Google Sheets 資料管理模組
-==========================================
+AI-CARE Lung - Google Sheets 資料管理模組（修正版）
+==================================================
 
-整合 Google Sheets 作為共享資料庫
-病人端和管理後台共用同一份 Sheet
+修正內容：
+1. 手機號碼格式比對問題（支援數字/字串格式）
+2. 密碼比對問題（統一轉為字串）
+3. 增加除錯資訊
 """
 
 import streamlit as st
@@ -17,7 +19,6 @@ import pandas as pd
 # Google Sheets 設定
 # ============================================
 
-# Sheets 欄位定義
 PATIENT_COLUMNS = [
     "patient_id", "name", "phone", "password", "age", "gender",
     "surgery_type", "surgery_date", "diagnosis", "medical_record",
@@ -51,8 +52,7 @@ INTERVENTION_COLUMNS = [
 def get_google_sheets_connection():
     """取得 Google Sheets 連線（使用快取）"""
     try:
-        # 從 Streamlit Secrets 讀取憑證
-        credentials_dict = st.secrets["gcp_service_account"]
+        credentials_dict = dict(st.secrets["gcp_service_account"])
         
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -77,12 +77,10 @@ def get_spreadsheet():
         return None
     
     try:
-        # 從 secrets 取得試算表 ID
         spreadsheet_id = st.secrets.get("spreadsheet_id", "")
         if spreadsheet_id:
             return client.open_by_key(spreadsheet_id)
         else:
-            # 或使用名稱
             spreadsheet_name = st.secrets.get("spreadsheet_name", "AI-CARE-Lung-Data")
             return client.open(spreadsheet_name)
     except Exception as e:
@@ -94,11 +92,38 @@ def get_or_create_worksheet(spreadsheet, sheet_name, columns):
     try:
         worksheet = spreadsheet.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
-        # 建立新工作表
         worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=len(columns))
-        # 設定標題列
         worksheet.update('A1', [columns])
     return worksheet
+
+# ============================================
+# 工具函數（修正版）
+# ============================================
+
+def normalize_phone(phone):
+    """標準化手機號碼格式"""
+    if phone is None:
+        return ""
+    # 轉為字串並移除空白
+    phone_str = str(phone).strip()
+    # 移除可能的小數點（如果被當成數字存）
+    if '.' in phone_str:
+        phone_str = phone_str.split('.')[0]
+    # 確保台灣手機格式（補前導零）
+    if len(phone_str) == 9 and not phone_str.startswith('0'):
+        phone_str = '0' + phone_str
+    return phone_str
+
+def normalize_password(password):
+    """標準化密碼格式"""
+    if password is None:
+        return ""
+    # 轉為字串
+    pwd_str = str(password).strip()
+    # 移除可能的小數點（如果被當成數字存）
+    if '.' in pwd_str:
+        pwd_str = pwd_str.split('.')[0]
+    return pwd_str
 
 # ============================================
 # 病人資料管理
@@ -114,12 +139,16 @@ def get_all_patients():
         worksheet = get_or_create_worksheet(spreadsheet, "Patients", PATIENT_COLUMNS)
         records = worksheet.get_all_records()
         
-        # 計算術後天數
         today = datetime.now().date()
         for record in records:
+            # 標準化手機和密碼格式
+            record["phone"] = normalize_phone(record.get("phone"))
+            record["password"] = normalize_password(record.get("password"))
+            
+            # 計算術後天數
             if record.get("surgery_date"):
                 try:
-                    surgery_date = datetime.strptime(record["surgery_date"], "%Y-%m-%d").date()
+                    surgery_date = datetime.strptime(str(record["surgery_date"]), "%Y-%m-%d").date()
                     record["post_op_day"] = (today - surgery_date).days
                 except:
                     record["post_op_day"] = 0
@@ -132,21 +161,23 @@ def get_all_patients():
         return []
 
 def get_patient_by_phone(phone):
-    """根據手機號碼查找病人"""
+    """根據手機號碼查找病人（修正版）"""
     patients = get_all_patients()
-    # 標準化輸入的手機號碼（移除前導零或轉為字串）
-    phone_str = str(phone).strip()
+    
+    # 標準化輸入的手機號碼
+    input_phone = normalize_phone(phone)
     
     for patient in patients:
-        # 標準化資料庫中的手機號碼
-        db_phone = str(patient.get("phone", "")).strip()
+        db_phone = patient.get("phone", "")
         
-        # 比對（支援有無前導零）
-        if db_phone == phone_str:
+        # 直接比對（已經標準化過了）
+        if db_phone == input_phone:
             return patient
-        # 如果 Google Sheets 把 0912345678 存成 912345678（數字格式）
-        if db_phone.lstrip('0') == phone_str.lstrip('0'):
+        
+        # 額外比對：移除所有前導零後比對
+        if db_phone.lstrip('0') == input_phone.lstrip('0') and input_phone.lstrip('0'):
             return patient
+    
     return None
 
 def get_patient_by_id(patient_id):
@@ -161,28 +192,43 @@ def create_patient(patient_data):
     """建立新病人"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
-        return False
+        return None
     
     try:
         worksheet = get_or_create_worksheet(spreadsheet, "Patients", PATIENT_COLUMNS)
         
-        # 準備資料列
-        row = []
-        for col in PATIENT_COLUMNS:
-            value = patient_data.get(col, "")
-            # 處理 dict/list 轉 JSON
-            if isinstance(value, (dict, list)):
-                value = json.dumps(value, ensure_ascii=False)
-            row.append(value)
+        # 產生病人 ID
+        phone = normalize_phone(patient_data.get("phone", ""))
+        patient_id = f"P{phone[-4:]}{datetime.now().strftime('%m%d')}"
         
-        # 新增到最後一列
+        # 準備資料列
+        row = [
+            patient_id,
+            patient_data.get("name", ""),
+            phone,  # 使用標準化後的手機號碼
+            str(patient_data.get("password", "")),  # 確保密碼是字串
+            patient_data.get("age", ""),
+            patient_data.get("gender", ""),
+            patient_data.get("surgery_type", "待設定"),
+            patient_data.get("surgery_date", ""),
+            patient_data.get("diagnosis", ""),
+            patient_data.get("medical_record", ""),
+            patient_data.get("status", "pending_setup"),
+            0,  # post_op_day
+            patient_data.get("consent_agreed", "Y"),
+            datetime.now().isoformat(),
+            datetime.now().isoformat(),
+            "",  # clinical_data
+            ""   # notes
+        ]
+        
         worksheet.append_row(row)
-        return True
+        return patient_id
     except Exception as e:
         st.error(f"建立病人失敗: {e}")
-        return False
+        return None
 
-def update_patient(patient_id, update_data):
+def update_patient(patient_id, updates):
     """更新病人資料"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
@@ -190,29 +236,25 @@ def update_patient(patient_id, update_data):
     
     try:
         worksheet = get_or_create_worksheet(spreadsheet, "Patients", PATIENT_COLUMNS)
+        records = worksheet.get_all_records()
         
-        # 找到病人所在列
-        cell = worksheet.find(patient_id)
-        if not cell:
-            return False
-        
-        row_number = cell.row
-        
-        # 更新各欄位
-        for key, value in update_data.items():
-            if key in PATIENT_COLUMNS:
-                col_index = PATIENT_COLUMNS.index(key) + 1
-                if isinstance(value, (dict, list)):
-                    value = json.dumps(value, ensure_ascii=False)
-                worksheet.update_cell(row_number, col_index, value)
-        
-        return True
+        for idx, record in enumerate(records):
+            if record.get("patient_id") == patient_id:
+                row_num = idx + 2  # +2 因為標題列和 0-based index
+                
+                for key, value in updates.items():
+                    if key in PATIENT_COLUMNS:
+                        col_num = PATIENT_COLUMNS.index(key) + 1
+                        worksheet.update_cell(row_num, col_num, value)
+                
+                return True
+        return False
     except Exception as e:
         st.error(f"更新病人失敗: {e}")
         return False
 
 # ============================================
-# 回報資料管理
+# 回報紀錄管理
 # ============================================
 
 def get_all_reports():
@@ -223,102 +265,69 @@ def get_all_reports():
     
     try:
         worksheet = get_or_create_worksheet(spreadsheet, "Reports", REPORT_COLUMNS)
-        records = worksheet.get_all_records()
-        
-        # 解析 symptoms JSON
-        for record in records:
-            if record.get("symptoms"):
-                try:
-                    record["symptoms"] = json.loads(record["symptoms"])
-                except:
-                    record["symptoms"] = []
-        
-        return records
+        return worksheet.get_all_records()
     except Exception as e:
-        st.error(f"讀取回報資料失敗: {e}")
+        st.error(f"讀取回報失敗: {e}")
         return []
 
 def get_patient_reports(patient_id):
     """取得特定病人的回報"""
     reports = get_all_reports()
-    patient_reports = [r for r in reports if r.get("patient_id") == patient_id]
-    return sorted(patient_reports, key=lambda x: x.get("timestamp", ""), reverse=True)
-
-def get_today_reports():
-    """取得今日回報"""
-    today = datetime.now().strftime("%Y-%m-%d")
-    reports = get_all_reports()
-    return [r for r in reports if r.get("date") == today]
-
-def save_report(patient_id, patient_name, report_data):
-    """儲存回報"""
-    spreadsheet = get_spreadsheet()
-    if not spreadsheet:
-        return False
-    
-    try:
-        worksheet = get_or_create_worksheet(spreadsheet, "Reports", REPORT_COLUMNS)
-        
-        now = datetime.now()
-        report_id = f"R{now.strftime('%Y%m%d%H%M%S')}"
-        
-        # 判斷警示等級
-        score = report_data.get("overall_score", 0)
-        if score >= 7:
-            alert_level = "red"
-        elif score >= 4:
-            alert_level = "yellow"
-        else:
-            alert_level = "green"
-        
-        row_data = {
-            "report_id": report_id,
-            "patient_id": patient_id,
-            "patient_name": patient_name,
-            "date": now.strftime("%Y-%m-%d"),
-            "timestamp": now.isoformat(),
-            "overall_score": report_data.get("overall_score", 0),
-            "symptoms": json.dumps(report_data.get("symptoms", []), ensure_ascii=False),
-            "messages_count": report_data.get("messages_count", 0),
-            "alert_level": alert_level,
-            "alert_handled": "N" if alert_level in ["red", "yellow"] else "",
-            "handled_by": "",
-            "handled_at": ""
-        }
-        
-        row = [row_data.get(col, "") for col in REPORT_COLUMNS]
-        worksheet.append_row(row)
-        return True
-    except Exception as e:
-        st.error(f"儲存回報失敗: {e}")
-        return False
+    return [r for r in reports if r.get("patient_id") == patient_id]
 
 def check_today_reported(patient_id):
     """檢查今天是否已回報"""
-    today = datetime.now().strftime("%Y-%m-%d")
     reports = get_patient_reports(patient_id)
+    today = datetime.now().strftime("%Y-%m-%d")
     for report in reports:
         if report.get("date") == today:
             return True
     return False
 
-# ============================================
-# 警示管理
-# ============================================
+def save_report(report_data):
+    """儲存回報"""
+    spreadsheet = get_spreadsheet()
+    if not spreadsheet:
+        return None
+    
+    try:
+        worksheet = get_or_create_worksheet(spreadsheet, "Reports", REPORT_COLUMNS)
+        
+        report_id = f"R{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        row = [
+            report_id,
+            report_data.get("patient_id", ""),
+            report_data.get("patient_name", ""),
+            report_data.get("date", datetime.now().strftime("%Y-%m-%d")),
+            report_data.get("timestamp", datetime.now().isoformat()),
+            report_data.get("overall_score", 0),
+            json.dumps(report_data.get("symptoms", {}), ensure_ascii=False),
+            report_data.get("messages_count", 0),
+            report_data.get("alert_level", "green"),
+            "N",  # alert_handled
+            "",   # handled_by
+            ""    # handled_at
+        ]
+        
+        worksheet.append_row(row)
+        return report_id
+    except Exception as e:
+        st.error(f"儲存回報失敗: {e}")
+        return None
+
+def get_today_reports():
+    """取得今日所有回報"""
+    reports = get_all_reports()
+    today = datetime.now().strftime("%Y-%m-%d")
+    return [r for r in reports if r.get("date") == today]
 
 def get_pending_alerts():
     """取得待處理警示"""
     reports = get_all_reports()
-    pending = []
-    for report in reports:
-        if report.get("alert_level") in ["red", "yellow"] and report.get("alert_handled") != "Y":
-            pending.append(report)
-    return sorted(pending, key=lambda x: (
-        0 if x.get("alert_level") == "red" else 1,
-        x.get("timestamp", "")
-    ), reverse=True)
+    return [r for r in reports if r.get("alert_level") in ["red", "yellow"] and r.get("alert_handled") != "Y"]
 
-def handle_alert(report_id, handled_by):
+def handle_alert(report_id, handler):
     """處理警示"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
@@ -326,23 +335,16 @@ def handle_alert(report_id, handled_by):
     
     try:
         worksheet = get_or_create_worksheet(spreadsheet, "Reports", REPORT_COLUMNS)
+        records = worksheet.get_all_records()
         
-        cell = worksheet.find(report_id)
-        if not cell:
-            return False
-        
-        row_number = cell.row
-        
-        # 更新處理狀態
-        alert_handled_col = REPORT_COLUMNS.index("alert_handled") + 1
-        handled_by_col = REPORT_COLUMNS.index("handled_by") + 1
-        handled_at_col = REPORT_COLUMNS.index("handled_at") + 1
-        
-        worksheet.update_cell(row_number, alert_handled_col, "Y")
-        worksheet.update_cell(row_number, handled_by_col, handled_by)
-        worksheet.update_cell(row_number, handled_at_col, datetime.now().isoformat())
-        
-        return True
+        for idx, record in enumerate(records):
+            if record.get("report_id") == report_id:
+                row_num = idx + 2
+                worksheet.update_cell(row_num, REPORT_COLUMNS.index("alert_handled") + 1, "Y")
+                worksheet.update_cell(row_num, REPORT_COLUMNS.index("handled_by") + 1, handler)
+                worksheet.update_cell(row_num, REPORT_COLUMNS.index("handled_at") + 1, datetime.now().isoformat())
+                return True
+        return False
     except Exception as e:
         st.error(f"處理警示失敗: {e}")
         return False
@@ -362,45 +364,42 @@ def get_education_pushes(patient_id=None):
         records = worksheet.get_all_records()
         
         if patient_id:
-            records = [r for r in records if r.get("patient_id") == patient_id]
-        
-        return sorted(records, key=lambda x: x.get("pushed_at", ""), reverse=True)
+            return [r for r in records if r.get("patient_id") == patient_id]
+        return records
     except Exception as e:
-        st.error(f"讀取衛教推送失敗: {e}")
+        st.error(f"讀取衛教紀錄失敗: {e}")
         return []
 
-def push_education(patient_id, patient_name, material_id, material_title, category, push_type, pushed_by):
+def push_education(push_data):
     """推送衛教"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
-        return False
+        return None
     
     try:
         worksheet = get_or_create_worksheet(spreadsheet, "Education", EDUCATION_COLUMNS)
         
-        now = datetime.now()
-        push_id = f"E{now.strftime('%Y%m%d%H%M%S')}"
+        push_id = f"E{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
-        row_data = {
-            "push_id": push_id,
-            "patient_id": patient_id,
-            "patient_name": patient_name,
-            "material_id": material_id,
-            "material_title": material_title,
-            "category": category,
-            "push_type": push_type,
-            "pushed_by": pushed_by,
-            "pushed_at": now.isoformat(),
-            "read_at": "",
-            "status": "sent"
-        }
+        row = [
+            push_id,
+            push_data.get("patient_id", ""),
+            push_data.get("patient_name", ""),
+            push_data.get("material_id", ""),
+            push_data.get("material_title", ""),
+            push_data.get("category", ""),
+            push_data.get("push_type", "manual"),
+            push_data.get("pushed_by", ""),
+            datetime.now().isoformat(),
+            "",  # read_at
+            "sent"
+        ]
         
-        row = [row_data.get(col, "") for col in EDUCATION_COLUMNS]
         worksheet.append_row(row)
-        return True
+        return push_id
     except Exception as e:
         st.error(f"推送衛教失敗: {e}")
-        return False
+        return None
 
 def mark_education_read(push_id):
     """標記衛教已讀"""
@@ -410,19 +409,15 @@ def mark_education_read(push_id):
     
     try:
         worksheet = get_or_create_worksheet(spreadsheet, "Education", EDUCATION_COLUMNS)
+        records = worksheet.get_all_records()
         
-        cell = worksheet.find(push_id)
-        if not cell:
-            return False
-        
-        row_number = cell.row
-        read_at_col = EDUCATION_COLUMNS.index("read_at") + 1
-        status_col = EDUCATION_COLUMNS.index("status") + 1
-        
-        worksheet.update_cell(row_number, read_at_col, datetime.now().isoformat())
-        worksheet.update_cell(row_number, status_col, "read")
-        
-        return True
+        for idx, record in enumerate(records):
+            if record.get("push_id") == push_id:
+                row_num = idx + 2
+                worksheet.update_cell(row_num, EDUCATION_COLUMNS.index("read_at") + 1, datetime.now().isoformat())
+                worksheet.update_cell(row_num, EDUCATION_COLUMNS.index("status") + 1, "read")
+                return True
+        return False
     except Exception as e:
         st.error(f"標記已讀失敗: {e}")
         return False
@@ -442,47 +437,44 @@ def get_interventions(patient_id=None):
         records = worksheet.get_all_records()
         
         if patient_id:
-            records = [r for r in records if r.get("patient_id") == patient_id]
-        
-        return sorted(records, key=lambda x: x.get("timestamp", ""), reverse=True)
+            return [r for r in records if r.get("patient_id") == patient_id]
+        return records
     except Exception as e:
         st.error(f"讀取介入紀錄失敗: {e}")
         return []
 
-def save_intervention(patient_id, patient_name, intervention_data, created_by):
+def save_intervention(intervention_data):
     """儲存介入紀錄"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
-        return False
+        return None
     
     try:
         worksheet = get_or_create_worksheet(spreadsheet, "Interventions", INTERVENTION_COLUMNS)
         
-        now = datetime.now()
-        intervention_id = f"I{now.strftime('%Y%m%d%H%M%S')}"
+        intervention_id = f"I{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
-        row_data = {
-            "intervention_id": intervention_id,
-            "patient_id": patient_id,
-            "patient_name": patient_name,
-            "date": now.strftime("%Y-%m-%d"),
-            "timestamp": now.isoformat(),
-            "method": intervention_data.get("method", ""),
-            "duration": intervention_data.get("duration", ""),
-            "content": intervention_data.get("content", ""),
-            "referral": intervention_data.get("referral", ""),
-            "created_by": created_by
-        }
+        row = [
+            intervention_id,
+            intervention_data.get("patient_id", ""),
+            intervention_data.get("patient_name", ""),
+            intervention_data.get("date", datetime.now().strftime("%Y-%m-%d")),
+            intervention_data.get("timestamp", datetime.now().isoformat()),
+            intervention_data.get("method", ""),
+            intervention_data.get("duration", ""),
+            intervention_data.get("content", ""),
+            intervention_data.get("referral", ""),
+            intervention_data.get("created_by", "")
+        ]
         
-        row = [row_data.get(col, "") for col in INTERVENTION_COLUMNS]
         worksheet.append_row(row)
-        return True
+        return intervention_id
     except Exception as e:
         st.error(f"儲存介入紀錄失敗: {e}")
-        return False
+        return None
 
 # ============================================
-# 統計函數
+# 統計資料
 # ============================================
 
 def get_dashboard_stats():
@@ -492,15 +484,12 @@ def get_dashboard_stats():
     today = datetime.now().strftime("%Y-%m-%d")
     
     today_reports = [r for r in reports if r.get("date") == today]
-    pending_alerts = get_pending_alerts()
-    
-    # 計算各狀態病人數
-    active_patients = [p for p in patients if p.get("status") not in ["pending_setup", "discharged"]]
+    pending_alerts = [r for r in reports if r.get("alert_level") in ["red", "yellow"] and r.get("alert_handled") != "Y"]
     
     stats = {
-        "total_patients": len(active_patients),
+        "total_patients": len(patients),
+        "active_patients": len([p for p in patients if p.get("status") not in ["discharged"]]),
         "today_reports": len(today_reports),
-        "report_rate": int(len(today_reports) / max(len(active_patients), 1) * 100),
         "pending_alerts": len(pending_alerts),
         "red_alerts": len([a for a in pending_alerts if a.get("alert_level") == "red"]),
         "yellow_alerts": len([a for a in pending_alerts if a.get("alert_level") == "yellow"]),
@@ -521,3 +510,40 @@ def export_reports_df():
     """匯出回報資料為 DataFrame"""
     reports = get_all_reports()
     return pd.DataFrame(reports)
+
+# ============================================
+# 除錯用函數
+# ============================================
+
+def debug_login(phone, password):
+    """除錯登入問題"""
+    patients = get_all_patients()
+    input_phone = normalize_phone(phone)
+    input_pwd = normalize_password(password)
+    
+    debug_info = {
+        "input_phone": input_phone,
+        "input_password": input_pwd,
+        "total_patients": len(patients),
+        "matches": []
+    }
+    
+    for p in patients:
+        db_phone = p.get("phone", "")
+        db_pwd = p.get("password", "")
+        
+        phone_match = (db_phone == input_phone) or (db_phone.lstrip('0') == input_phone.lstrip('0'))
+        pwd_match = (db_pwd == input_pwd)
+        
+        if phone_match or db_phone[-4:] == input_phone[-4:]:  # 至少後4碼相同
+            debug_info["matches"].append({
+                "patient_id": p.get("patient_id"),
+                "name": p.get("name"),
+                "db_phone": db_phone,
+                "db_password": db_pwd,
+                "phone_match": phone_match,
+                "pwd_match": pwd_match,
+                "status": p.get("status")
+            })
+    
+    return debug_info
