@@ -26,17 +26,32 @@ CACHE_TTL = 60  # 快取時間：60 秒
 # ============================================
 
 PATIENT_COLUMNS = [
-    "patient_id", "name", "phone", "password", "age", "gender",
-    "surgery_type", "surgery_date", "diagnosis", "medical_record",
-    "status", "post_op_day",
-    "consent_agreed", "consent_time", "registered_at",
-    "clinical_data", "notes"
+    "patient_id", "name", "phone", "password", "birth_date", "age", "gender",
+    "id_number", "emergency_contact", "emergency_phone",
+    # 診斷資訊
+    "diagnosis", "pathology", "clinical_stage", "pathological_stage", 
+    "tumor_location", "tumor_size", "histology_type",
+    # 手術資訊
+    "surgery_type", "surgery_date", "surgery_approach", "resection_extent",
+    "lymph_node_dissection", "surgical_margin", "complications",
+    # 治療資訊
+    "adjuvant_chemo", "adjuvant_radio", "target_therapy", "immunotherapy",
+    "treatment_status", "treatment_notes",
+    # 共病症與風險
+    "comorbidities", "smoking_history", "risk_level",
+    # 功能狀態
+    "ecog_ps", "kps_score",
+    # 系統欄位
+    "status", "post_op_day", "consent_agreed", "consent_time", "registered_at",
+    "notes"
 ]
 
 REPORT_COLUMNS = [
     "report_id", "patient_id", "patient_name", "date", "timestamp",
-    "overall_score", "symptoms", "messages_count",
-    "alert_level", "alert_handled", "handled_by", "handled_at"
+    "overall_score", "symptoms", "messages_count", 
+    "conversation", "ai_summary",
+    "alert_level", "alert_handled", "handled_by", "handled_time",
+    "handling_action", "handling_notes"
 ]
 
 EDUCATION_COLUMNS = [
@@ -47,7 +62,10 @@ EDUCATION_COLUMNS = [
 
 INTERVENTION_COLUMNS = [
     "intervention_id", "patient_id", "patient_name", "date", "timestamp",
-    "method", "duration", "content", "referral", "created_by"
+    "intervention_type", "intervention_category", "method", "duration", 
+    "problem_addressed", "content", "pre_symptom_score", "post_symptom_score",
+    "outcome", "satisfaction", "referral", "referral_status", "follow_up_date",
+    "created_by", "notes"
 ]
 
 # ============================================
@@ -325,7 +343,7 @@ def check_today_reported(patient_id):
     return False
 
 def save_report(report_data):
-    """儲存回報"""
+    """儲存回報（含對話內容和 AI 摘要）"""
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
         return None
@@ -334,6 +352,10 @@ def save_report(report_data):
         worksheet = get_or_create_worksheet(spreadsheet, "Reports", REPORT_COLUMNS)
         
         report_id = f"R{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # 對話內容（JSON 格式）
+        conversation = report_data.get("conversation", [])
+        conversation_str = json.dumps(conversation, ensure_ascii=False) if conversation else ""
         
         row = [
             report_id,
@@ -344,10 +366,14 @@ def save_report(report_data):
             report_data.get("overall_score", 0),
             json.dumps(report_data.get("symptoms", {}), ensure_ascii=False),
             report_data.get("messages_count", 0),
+            conversation_str,  # 對話內容
+            report_data.get("ai_summary", ""),  # AI 摘要
             report_data.get("alert_level", "green"),
-            "N",
-            "",
-            ""
+            "N",  # alert_handled
+            "",   # handled_by
+            "",   # handled_time
+            "",   # handling_action
+            ""    # handling_notes
         ]
         
         worksheet.append_row(row)
@@ -383,7 +409,7 @@ def handle_alert(report_id, handler):
                 row_num = idx + 2
                 worksheet.update_cell(row_num, REPORT_COLUMNS.index("alert_handled") + 1, "Y")
                 worksheet.update_cell(row_num, REPORT_COLUMNS.index("handled_by") + 1, handler)
-                worksheet.update_cell(row_num, REPORT_COLUMNS.index("handled_at") + 1, datetime.now().isoformat())
+                worksheet.update_cell(row_num, REPORT_COLUMNS.index("handled_time") + 1, datetime.now().isoformat())
                 clear_cache()
                 return True
         return False

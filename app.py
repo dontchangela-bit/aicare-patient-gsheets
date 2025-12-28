@@ -1,11 +1,11 @@
 """
-AI-CARE Lung - 病人端（修正版）
+AI-CARE Lung - 病人端（美化版）
 =============================
 
 修正內容：
 1. 登入驗證邏輯修正
 2. 手機號碼/密碼格式問題
-3. 增加除錯模式
+3. UI 美化 - 親切友善介面
 """
 
 import streamlit as st
@@ -47,6 +47,18 @@ try:
 except:
     OPENAI_AVAILABLE = False
 
+# UI 美化模組
+try:
+    from ui_styles import (
+        init_patient_style, render_welcome, render_symptom_question,
+        render_score_display, render_chat_message, render_completion_message,
+        render_progress, render_education_card, render_tip_box,
+        render_emergency_contact, COLORS
+    )
+    UI_STYLES_AVAILABLE = True
+except:
+    UI_STYLES_AVAILABLE = False
+
 # ============================================
 # 頁面設定
 # ============================================
@@ -57,16 +69,18 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ============================================
-# CSS
-# ============================================
-st.markdown("""
-<style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .stButton > button { border-radius: 20px; }
-</style>
-""", unsafe_allow_html=True)
+# 套用美化樣式
+if UI_STYLES_AVAILABLE:
+    init_patient_style()
+else:
+    # 備用 CSS
+    st.markdown("""
+    <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        .stButton > button { border-radius: 20px; }
+    </style>
+    """, unsafe_allow_html=True)
 
 # ============================================
 # Session State
@@ -147,18 +161,45 @@ def calculate_post_op_day(surgery_date_str):
         return 0
 
 # ============================================
-# 註冊/登入頁面（修正版）
+# 註冊/登入頁面（美化版）
 # ============================================
 def render_registration():
-    """病人註冊/登入頁面"""
+    """病人註冊/登入頁面（美化版）"""
     
-    st.markdown(f"""
-    <div style="text-align: center; padding: 40px 0;">
-        <div style="font-size: 64px; margin-bottom: 16px;">🫁</div>
-        <h1 style="color: #1e293b; margin-bottom: 4px; font-size: 28px;">{SYSTEM_NAME}</h1>
-        <p style="color: #64748b; font-size: 16px;">{HOSPITAL_NAME} 智慧照護系統</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # 美化版標題
+    if UI_STYLES_AVAILABLE:
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, #00897B 0%, #26A69A 100%);
+            padding: 40px 20px;
+            border-radius: 25px;
+            text-align: center;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,137,123,0.3);
+        ">
+            <div style="font-size: 70px; margin-bottom: 15px;">🫁</div>
+            <h1 style="color: white; font-size: 32px; margin-bottom: 5px;">{SYSTEM_NAME}</h1>
+            <p style="color: rgba(255,255,255,0.9); font-size: 16px;">{HOSPITAL_NAME} 智慧照護系統</p>
+            <p style="color: rgba(255,255,255,0.7); font-size: 14px; margin-top: 10px;">
+                讓我們一起守護您的健康 ❤️
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 嘗試使用 Logo 模組
+        try:
+            from logos import render_login_header
+            # Logo 已經在上面渲染
+        except:
+            pass
+    else:
+        st.markdown(f"""
+        <div style="text-align: center; padding: 40px 0;">
+            <div style="font-size: 64px; margin-bottom: 16px;">🫁</div>
+            <h1 style="color: #1e293b; margin-bottom: 4px; font-size: 28px;">{SYSTEM_NAME}</h1>
+            <p style="color: #64748b; font-size: 16px;">{HOSPITAL_NAME} 智慧照護系統</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["📝 首次使用", "🔑 我已註冊"])
     
@@ -392,18 +433,34 @@ def render_pending_setup():
 # 主聊天介面
 # ============================================
 def render_chat_interface():
-    """主聊天介面"""
+    """主聊天介面（美化版）"""
     patient_info = st.session_state.patient_info
     
-    # 頂部資訊
-    col1, col2, col3 = st.columns([2, 2, 1])
-    with col1:
-        st.markdown(f"👤 **{patient_info.get('name', '使用者')}**")
-    with col2:
-        post_op_day = patient_info.get('post_op_day', 0)
-        st.markdown(f"📅 **術後 D+{post_op_day}**")
+    # 美化版歡迎區
+    if UI_STYLES_AVAILABLE:
+        render_welcome(
+            patient_info.get('name', '使用者'),
+            patient_info.get('post_op_day', 0)
+        )
+    else:
+        # 頂部資訊（備用）
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            st.markdown(f"👤 **{patient_info.get('name', '使用者')}**")
+        with col2:
+            post_op_day = patient_info.get('post_op_day', 0)
+            st.markdown(f"📅 **術後 D+{post_op_day}**")
+        with col3:
+            if st.button("🚪"):
+                st.session_state.patient_registered = False
+                st.session_state.patient_info = {}
+                st.session_state.messages = []
+                st.rerun()
+    
+    # 登出按鈕（美化版）
+    col1, col2, col3 = st.columns([1, 2, 1])
     with col3:
-        if st.button("🚪"):
+        if st.button("🚪 登出", key="logout_btn"):
             st.session_state.patient_registered = False
             st.session_state.patient_info = {}
             st.session_state.messages = []
@@ -413,15 +470,38 @@ def render_chat_interface():
     
     # 檢查是否已完成今日回報
     if st.session_state.report_completed:
-        st.success("✅ 您今天已完成回報！")
-        st.info("明天再來回報您的健康狀況喔！")
+        if UI_STYLES_AVAILABLE:
+            render_completion_message()
+            st.markdown("<br>", unsafe_allow_html=True)
+            render_tip_box("明天再來回報您的健康狀況喔！每日回報有助於醫療團隊更好地照顧您。", "💡")
+        else:
+            st.success("✅ 您今天已完成回報！")
+            st.info("明天再來回報您的健康狀況喔！")
         
-        if st.button("📊 查看回報紀錄"):
+        if st.button("📊 查看回報紀錄", use_container_width=True):
             reports = get_patient_reports(st.session_state.patient_id) if GSHEETS_AVAILABLE else []
             if reports:
                 st.write("### 最近回報紀錄")
                 for r in reports[-5:]:
-                    st.write(f"- {r.get('date')}: 整體 {r.get('overall_score')}/10 ({r.get('alert_level')})")
+                    level_icon = "🔴" if r.get('alert_level') == 'red' else "🟡" if r.get('alert_level') == 'yellow' else "🟢"
+                    st.markdown(f"""
+                    <div style="
+                        background: white;
+                        padding: 12px 15px;
+                        border-radius: 10px;
+                        margin-bottom: 8px;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    ">
+                        <span>{r.get('date')}</span>
+                        <span>{level_icon} {r.get('overall_score')}/10</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # 緊急聯絡
+        if UI_STYLES_AVAILABLE:
+            render_emergency_contact()
         return
     
     # 初始化對話
@@ -442,17 +522,27 @@ def render_chat_interface():
             "time": now.strftime("%H:%M")
         })
     
-    # 顯示對話
+    # 顯示對話（美化版）
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
+        if UI_STYLES_AVAILABLE:
+            render_chat_message(msg["content"], is_ai=(msg["role"] == "assistant"))
+        else:
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
     
-    # 快速回覆按鈕
-    st.markdown("**快速回覆：**")
+    # 快速回覆按鈕（美化）
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("**請選擇或輸入您的回覆：**")
     cols = st.columns(5)
-    quick_replies = ["0-3分", "4-6分", "7-10分", "還好", "不太好"]
-    for i, reply in enumerate(quick_replies):
-        if cols[i].button(reply, key=f"quick_{i}"):
+    quick_replies = [
+        ("😊", "0-3分"), 
+        ("😐", "4-6分"), 
+        ("😣", "7-10分"), 
+        ("👍", "還好"), 
+        ("👎", "不太好")
+    ]
+    for i, (emoji, reply) in enumerate(quick_replies):
+        if cols[i].button(f"{emoji}\n{reply}", key=f"quick_{i}", use_container_width=True):
             handle_user_input(reply)
     
     # 文字輸入
@@ -490,6 +580,17 @@ def handle_user_input(user_input):
     
     # 檢查是否完成回報
     if len(st.session_state.messages) >= 10 or "感謝" in ai_response or "完成" in ai_response:
+        # 產生 AI 摘要
+        ai_summary = generate_ai_summary()
+        
+        # 準備對話內容
+        conversation = []
+        for msg in st.session_state.messages:
+            conversation.append({
+                "role": msg.get("role", ""),
+                "content": msg.get("content", "")[:500]  # 限制長度
+            })
+        
         # 儲存回報
         if GSHEETS_AVAILABLE:
             save_report({
@@ -498,11 +599,83 @@ def handle_user_input(user_input):
                 "overall_score": st.session_state.current_score,
                 "symptoms": st.session_state.symptoms_reported,
                 "messages_count": len(st.session_state.messages),
+                "conversation": conversation,
+                "ai_summary": ai_summary,
                 "alert_level": "red" if st.session_state.current_score >= 7 else "yellow" if st.session_state.current_score >= 4 else "green"
             })
         st.session_state.report_completed = True
     
     st.rerun()
+
+def generate_ai_summary():
+    """產生 AI 對話摘要"""
+    if not st.session_state.messages:
+        return ""
+    
+    # 提取病人訊息
+    patient_messages = [msg["content"] for msg in st.session_state.messages if msg.get("role") == "user"]
+    
+    if not patient_messages:
+        return ""
+    
+    # 如果有 OpenAI API，使用 AI 產生摘要
+    if OPENAI_AVAILABLE and OPENAI_API_KEY:
+        try:
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            
+            conversation_text = "\n".join([
+                f"{'病人' if msg.get('role') == 'user' else 'AI'}: {msg.get('content', '')}"
+                for msg in st.session_state.messages[-10:]  # 最近 10 則
+            ])
+            
+            summary_prompt = f"""請根據以下病人與AI的對話，產生一段簡短的摘要（約50-100字），重點包括：
+1. 病人的主要症狀
+2. 症狀的嚴重程度
+3. 需要特別注意的事項
+
+對話內容：
+{conversation_text}
+
+請直接輸出摘要，不要加任何前綴。"""
+            
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": summary_prompt}],
+                max_tokens=200,
+                temperature=0.3
+            )
+            
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            pass
+    
+    # 如果沒有 API 或失敗，產生簡單摘要
+    symptoms = st.session_state.symptoms_reported
+    score = st.session_state.current_score
+    
+    symptom_names = {
+        "pain": "疼痛", "dyspnea": "呼吸困難", "cough": "咳嗽",
+        "fatigue": "疲勞", "sleep": "睡眠", "appetite": "食慾", "mood": "情緒"
+    }
+    
+    high_symptoms = []
+    for key, value in symptoms.items():
+        if isinstance(value, (int, float)) and value >= 4:
+            name = symptom_names.get(key, key)
+            high_symptoms.append(f"{name}({value}分)")
+    
+    if high_symptoms:
+        summary = f"整體評分 {score}/10。主要症狀：{', '.join(high_symptoms)}。"
+    else:
+        summary = f"整體評分 {score}/10。症狀控制良好。"
+    
+    # 加入病人的關鍵描述
+    for msg in patient_messages[-3:]:
+        if len(msg) > 20:
+            summary += f" 病人表示：「{msg[:50]}...」"
+            break
+    
+    return summary
 
 def get_ai_response(user_message):
     """取得 AI 回應"""
