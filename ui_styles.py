@@ -312,32 +312,31 @@ def get_patient_css():
 
 def render_welcome(name, post_op_day):
     """渲染歡迎區塊（含 Logo）"""
+    import os
     greeting = "早安" if 5 <= __import__('datetime').datetime.now().hour < 12 else "午安" if 12 <= __import__('datetime').datetime.now().hour < 18 else "晚安"
     
-    # 嘗試載入 Logo
-    logo_html = ""
-    if LOGOS_AVAILABLE:
-        try:
-            from logos import get_logo_base64
-            tsgh_b64 = get_logo_base64("tsgh_logo.png")
-            dmc_b64 = get_logo_base64("dmc_logo.png")
-            if tsgh_b64 and dmc_b64:
-                logo_html = f"""
-                <div style="display: flex; justify-content: center; gap: 20px; margin-bottom: 15px;">
-                    <img src="data:image/png;base64,{tsgh_b64}" style="height: 45px; object-fit: contain;">
-                    <img src="data:image/png;base64,{dmc_b64}" style="height: 45px; object-fit: contain;">
-                </div>
-                """
-        except:
-            pass
-    
-    if not logo_html:
-        logo_html = '<div style="font-size: 50px; margin-bottom: 15px;">👋</div>'
+    # 顯示 Logo（使用 st.image）
+    try:
+        logo_paths = [
+            ("tsgh_logo.png", "dmc_logo.png"),
+            ("./tsgh_logo.png", "./dmc_logo.png"),
+        ]
+        for tsgh_path, dmc_path in logo_paths:
+            if os.path.exists(tsgh_path) and os.path.exists(dmc_path):
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    logo_col1, logo_col2 = st.columns(2)
+                    with logo_col1:
+                        st.image(tsgh_path, width=100)
+                    with logo_col2:
+                        st.image(dmc_path, width=100)
+                break
+    except:
+        pass
     
     st.markdown(f"""
     <div class="welcome-box">
-        {logo_html}
-        <h2>{greeting}，{name}</h2>
+        <h2>{greeting}，{name} 👋</h2>
         <p>術後第 <b style="font-size: 24px;">{post_op_day}</b> 天</p>
         <p style="margin-top: 10px; opacity: 0.8;">今天感覺如何呢？讓我們一起記錄您的狀況</p>
     </div>

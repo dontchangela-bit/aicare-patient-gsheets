@@ -166,49 +166,44 @@ def calculate_post_op_day(surgery_date_str):
 def render_registration():
     """病人註冊/登入頁面（美化版）"""
     
-    # 嘗試使用 Logo 模組
-    logo_html = ""
+    # 顯示 Logo（使用 st.image 而非 HTML）
     try:
-        from logos import render_login_header, get_logo_base64
-        tsgh_b64 = get_logo_base64("tsgh_logo.png")
-        dmc_b64 = get_logo_base64("dmc_logo.png")
-        if tsgh_b64 and dmc_b64:
-            logo_html = f"""
-            <div style="display: flex; justify-content: center; gap: 30px; margin-bottom: 20px;">
-                <img src="data:image/png;base64,{tsgh_b64}" style="height: 60px; object-fit: contain;">
-                <img src="data:image/png;base64,{dmc_b64}" style="height: 60px; object-fit: contain;">
-            </div>
-            """
+        import os
+        logo_paths = [
+            ("tsgh_logo.png", "dmc_logo.png"),
+            ("./tsgh_logo.png", "./dmc_logo.png"),
+        ]
+        
+        for tsgh_path, dmc_path in logo_paths:
+            if os.path.exists(tsgh_path) and os.path.exists(dmc_path):
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    logo_col1, logo_col2 = st.columns(2)
+                    with logo_col1:
+                        st.image(tsgh_path, width=120)
+                    with logo_col2:
+                        st.image(dmc_path, width=120)
+                break
     except:
         pass
     
-    # 美化版標題
-    if UI_STYLES_AVAILABLE:
-        st.markdown(f"""
-        <div style="
-            background: linear-gradient(135deg, #00897B 0%, #26A69A 100%);
-            padding: 40px 20px;
-            border-radius: 25px;
-            text-align: center;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 40px rgba(0,137,123,0.3);
-        ">
-            {logo_html if logo_html else '<div style="font-size: 70px; margin-bottom: 15px;">🫁</div>'}
-            <h1 style="color: white; font-size: 32px; margin-bottom: 5px;">{SYSTEM_NAME}</h1>
-            <p style="color: rgba(255,255,255,0.9); font-size: 16px;">{HOSPITAL_NAME} 智慧照護系統</p>
-            <p style="color: rgba(255,255,255,0.7); font-size: 14px; margin-top: 10px;">
-                讓我們一起守護您的健康 ❤️
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div style="text-align: center; padding: 40px 0;">
-            <div style="font-size: 64px; margin-bottom: 16px;">🫁</div>
-            <h1 style="color: #1e293b; margin-bottom: 4px; font-size: 28px;">{SYSTEM_NAME}</h1>
-            <p style="color: #64748b; font-size: 16px;">{HOSPITAL_NAME} 智慧照護系統</p>
-        </div>
-        """, unsafe_allow_html=True)
+    # 標題區
+    st.markdown(f"""
+    <div style="
+        background: linear-gradient(135deg, #00897B 0%, #26A69A 100%);
+        padding: 30px 20px;
+        border-radius: 20px;
+        text-align: center;
+        margin-bottom: 25px;
+        box-shadow: 0 8px 30px rgba(0,137,123,0.25);
+    ">
+        <h1 style="color: white; font-size: 28px; margin-bottom: 5px;">🫁 {SYSTEM_NAME}</h1>
+        <p style="color: rgba(255,255,255,0.9); font-size: 15px;">{HOSPITAL_NAME} 智慧照護系統</p>
+        <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin-top: 8px;">
+            讓我們一起守護您的健康 ❤️
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["📝 首次使用", "🔑 我已註冊"])
     
@@ -541,21 +536,38 @@ def render_chat_interface():
     
     # 快速回覆按鈕（美化）
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("**請選擇或輸入您的回覆：**")
-    cols = st.columns(5)
+    st.markdown("### 📝 請選擇或輸入您的回覆")
+    
+    # 分數快速選擇
+    st.markdown("**症狀分數快速選擇：**")
+    cols = st.columns(3)
     quick_replies = [
-        ("😊", "0-3分"), 
-        ("😐", "4-6分"), 
-        ("😣", "7-10分"), 
-        ("👍", "還好"), 
-        ("👎", "不太好")
+        ("😊 0-3分", "我今天感覺不錯，大概2-3分"), 
+        ("😐 4-6分", "有一些不舒服，大概5分左右"), 
+        ("😣 7-10分", "很不舒服，大概7-8分"),
     ]
-    for i, (emoji, reply) in enumerate(quick_replies):
-        if cols[i].button(f"{emoji}\n{reply}", key=f"quick_{i}", use_container_width=True):
+    for i, (label, reply) in enumerate(quick_replies):
+        if cols[i].button(label, key=f"quick_{i}", use_container_width=True):
             handle_user_input(reply)
     
-    # 文字輸入
-    user_input = st.chat_input("輸入您的回覆...")
+    # 常用回覆
+    st.markdown("**常用回覆：**")
+    cols2 = st.columns(4)
+    common_replies = [
+        ("😊 還不錯", "今天感覺還不錯"),
+        ("😓 有點痛", "傷口有點痛"),
+        ("😮‍💨 有點喘", "呼吸有點喘"),
+        ("😴 很疲勞", "感覺很疲勞"),
+    ]
+    for i, (label, reply) in enumerate(common_replies):
+        if cols2[i].button(label, key=f"common_{i}", use_container_width=True):
+            handle_user_input(reply)
+    
+    st.markdown("---")
+    
+    # 文字輸入框
+    st.markdown("**💬 或直接輸入您想說的話：**")
+    user_input = st.chat_input("請描述您的感覺，例如：「今天傷口有點痛，大概5分」")
     if user_input:
         handle_user_input(user_input)
 
