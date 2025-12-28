@@ -311,12 +311,32 @@ def get_patient_css():
 # ============================================
 
 def render_welcome(name, post_op_day):
-    """渲染歡迎區塊"""
+    """渲染歡迎區塊（含 Logo）"""
     greeting = "早安" if 5 <= __import__('datetime').datetime.now().hour < 12 else "午安" if 12 <= __import__('datetime').datetime.now().hour < 18 else "晚安"
+    
+    # 嘗試載入 Logo
+    logo_html = ""
+    if LOGOS_AVAILABLE:
+        try:
+            from logos import get_logo_base64
+            tsgh_b64 = get_logo_base64("tsgh_logo.png")
+            dmc_b64 = get_logo_base64("dmc_logo.png")
+            if tsgh_b64 and dmc_b64:
+                logo_html = f"""
+                <div style="display: flex; justify-content: center; gap: 20px; margin-bottom: 15px;">
+                    <img src="data:image/png;base64,{tsgh_b64}" style="height: 45px; object-fit: contain;">
+                    <img src="data:image/png;base64,{dmc_b64}" style="height: 45px; object-fit: contain;">
+                </div>
+                """
+        except:
+            pass
+    
+    if not logo_html:
+        logo_html = '<div style="font-size: 50px; margin-bottom: 15px;">👋</div>'
     
     st.markdown(f"""
     <div class="welcome-box">
-        <div style="font-size: 50px; margin-bottom: 15px;">👋</div>
+        {logo_html}
         <h2>{greeting}，{name}</h2>
         <p>術後第 <b style="font-size: 24px;">{post_op_day}</b> 天</p>
         <p style="margin-top: 10px; opacity: 0.8;">今天感覺如何呢？讓我們一起記錄您的狀況</p>

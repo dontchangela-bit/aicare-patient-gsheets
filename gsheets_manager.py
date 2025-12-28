@@ -47,10 +47,19 @@ PATIENT_COLUMNS = [
 ]
 
 REPORT_COLUMNS = [
-    "report_id", "patient_id", "patient_name", "date", "timestamp",
-    "overall_score", "symptoms", "messages_count", 
+    "report_id", "patient_id", "patient_name", 
+    "report_date", "report_time", "post_op_day",
+    # AI 對話提取的分數
+    "pain_score", "fatigue_score", "dyspnea_score", "cough_score", 
+    "sleep_score", "appetite_score", "mood_score", "overall_score",
+    "total_score", "alert_level", "symptoms",
+    # 對話內容
     "conversation", "ai_summary",
-    "alert_level", "alert_handled", "handled_by", "handled_time",
+    # 問卷分數（與 AI 分數配對比較）
+    "questionnaire_pain", "questionnaire_fatigue", "questionnaire_dyspnea",
+    "questionnaire_cough", "questionnaire_sleep", "questionnaire_appetite",
+    # 處理狀態
+    "handling_status", "handled_by", "handled_time", 
     "handling_action", "handling_notes"
 ]
 
@@ -352,28 +361,80 @@ def save_report(report_data):
         worksheet = get_or_create_worksheet(spreadsheet, "Reports", REPORT_COLUMNS)
         
         report_id = f"R{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        now = datetime.now()
         
         # 對話內容（JSON 格式）
         conversation = report_data.get("conversation", [])
         conversation_str = json.dumps(conversation, ensure_ascii=False) if conversation else ""
         
+        # 從 symptoms 字典提取各症狀分數
+        symptoms = report_data.get("symptoms", {})
+        if not isinstance(symptoms, dict):
+            symptoms = {}
+        
+        # AI 對話提取的分數
+        pain_score = symptoms.get("pain", report_data.get("pain_score", 0))
+        fatigue_score = symptoms.get("fatigue", report_data.get("fatigue_score", 0))
+        dyspnea_score = symptoms.get("dyspnea", report_data.get("dyspnea_score", 0))
+        cough_score = symptoms.get("cough", report_data.get("cough_score", 0))
+        sleep_score = symptoms.get("sleep", report_data.get("sleep_score", 5))
+        appetite_score = symptoms.get("appetite", report_data.get("appetite_score", 5))
+        mood_score = symptoms.get("mood", report_data.get("mood_score", 5))
+        overall_score = report_data.get("overall_score", 0)
+        
+        # 計算總分
+        total_score = pain_score + fatigue_score + dyspnea_score + cough_score + (10 - sleep_score) + (10 - appetite_score) + (10 - mood_score)
+        
+        # 問卷分數（目前設為與 AI 分數相同，之後可以分開收集）
+        q_pain = report_data.get("questionnaire_pain", pain_score)
+        q_fatigue = report_data.get("questionnaire_fatigue", fatigue_score)
+        q_dyspnea = report_data.get("questionnaire_dyspnea", dyspnea_score)
+        q_cough = report_data.get("questionnaire_cough", cough_score)
+        q_sleep = report_data.get("questionnaire_sleep", sleep_score)
+        q_appetite = report_data.get("questionnaire_appetite", appetite_score)
+        
+        # 計算術後天數
+        post_op_day = report_data.get("post_op_day", 0)
+        
+        # 症狀描述
+        symptom_list = []
+        if pain_score >= 4: symptom_list.append("疼痛")
+        if fatigue_score >= 4: symptom_list.append("疲勞")
+        if dyspnea_score >= 4: symptom_list.append("呼吸困難")
+        if cough_score >= 4: symptom_list.append("咳嗽")
+        symptoms_str = "、".join(symptom_list) if symptom_list else "恢復良好"
+        
         row = [
             report_id,
             report_data.get("patient_id", ""),
             report_data.get("patient_name", ""),
-            report_data.get("date", datetime.now().strftime("%Y-%m-%d")),
-            report_data.get("timestamp", datetime.now().isoformat()),
-            report_data.get("overall_score", 0),
-            json.dumps(report_data.get("symptoms", {}), ensure_ascii=False),
-            report_data.get("messages_count", 0),
-            conversation_str,  # 對話內容
-            report_data.get("ai_summary", ""),  # AI 摘要
+            now.strftime("%Y-%m-%d"),  # report_date
+            now.strftime("%H:%M"),  # report_time
+            post_op_day,
+            pain_score,
+            fatigue_score,
+            dyspnea_score,
+            cough_score,
+            sleep_score,
+            appetite_score,
+            mood_score,
+            overall_score,
+            total_score,
             report_data.get("alert_level", "green"),
-            "N",  # alert_handled
-            "",   # handled_by
-            "",   # handled_time
-            "",   # handling_action
-            ""    # handling_notes
+            symptoms_str,
+            conversation_str,
+            report_data.get("ai_summary", ""),
+            q_pain,
+            q_fatigue,
+            q_dyspnea,
+            q_cough,
+            q_sleep,
+            q_appetite,
+            "pending",  # handling_status
+            "",  # handled_by
+            "",  # handled_time
+            "",  # handling_action
+            ""   # handling_notes
         ]
         
         worksheet.append_row(row)

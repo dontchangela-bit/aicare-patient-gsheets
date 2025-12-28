@@ -104,7 +104,7 @@ if 'current_score' not in st.session_state:
     st.session_state.current_score = 0
 
 if 'symptoms_reported' not in st.session_state:
-    st.session_state.symptoms_reported = []
+    st.session_state.symptoms_reported = {}
 
 if 'report_completed' not in st.session_state:
     st.session_state.report_completed = False
@@ -166,6 +166,22 @@ def calculate_post_op_day(surgery_date_str):
 def render_registration():
     """病人註冊/登入頁面（美化版）"""
     
+    # 嘗試使用 Logo 模組
+    logo_html = ""
+    try:
+        from logos import render_login_header, get_logo_base64
+        tsgh_b64 = get_logo_base64("tsgh_logo.png")
+        dmc_b64 = get_logo_base64("dmc_logo.png")
+        if tsgh_b64 and dmc_b64:
+            logo_html = f"""
+            <div style="display: flex; justify-content: center; gap: 30px; margin-bottom: 20px;">
+                <img src="data:image/png;base64,{tsgh_b64}" style="height: 60px; object-fit: contain;">
+                <img src="data:image/png;base64,{dmc_b64}" style="height: 60px; object-fit: contain;">
+            </div>
+            """
+    except:
+        pass
+    
     # 美化版標題
     if UI_STYLES_AVAILABLE:
         st.markdown(f"""
@@ -177,7 +193,7 @@ def render_registration():
             margin-bottom: 30px;
             box-shadow: 0 10px 40px rgba(0,137,123,0.3);
         ">
-            <div style="font-size: 70px; margin-bottom: 15px;">🫁</div>
+            {logo_html if logo_html else '<div style="font-size: 70px; margin-bottom: 15px;">🫁</div>'}
             <h1 style="color: white; font-size: 32px; margin-bottom: 5px;">{SYSTEM_NAME}</h1>
             <p style="color: rgba(255,255,255,0.9); font-size: 16px;">{HOSPITAL_NAME} 智慧照護系統</p>
             <p style="color: rgba(255,255,255,0.7); font-size: 14px; margin-top: 10px;">
@@ -185,13 +201,6 @@ def render_registration():
             </p>
         </div>
         """, unsafe_allow_html=True)
-        
-        # 嘗試使用 Logo 模組
-        try:
-            from logos import render_login_header
-            # Logo 已經在上面渲染
-        except:
-            pass
     else:
         st.markdown(f"""
         <div style="text-align: center; padding: 40px 0;">
@@ -591,6 +600,16 @@ def handle_user_input(user_input):
                 "content": msg.get("content", "")[:500]  # 限制長度
             })
         
+        # 計算術後天數
+        post_op_day = 0
+        surgery_date_str = st.session_state.patient_info.get("surgery_date", "")
+        if surgery_date_str:
+            try:
+                surgery_date = datetime.strptime(surgery_date_str.split()[0], "%Y-%m-%d")
+                post_op_day = (datetime.now() - surgery_date).days
+            except:
+                pass
+        
         # 儲存回報
         if GSHEETS_AVAILABLE:
             save_report({
@@ -598,7 +617,7 @@ def handle_user_input(user_input):
                 "patient_name": st.session_state.patient_info.get("name", ""),
                 "overall_score": st.session_state.current_score,
                 "symptoms": st.session_state.symptoms_reported,
-                "messages_count": len(st.session_state.messages),
+                "post_op_day": post_op_day,
                 "conversation": conversation,
                 "ai_summary": ai_summary,
                 "alert_level": "red" if st.session_state.current_score >= 7 else "yellow" if st.session_state.current_score >= 4 else "green"
@@ -652,6 +671,10 @@ def generate_ai_summary():
     # 如果沒有 API 或失敗，產生簡單摘要
     symptoms = st.session_state.symptoms_reported
     score = st.session_state.current_score
+    
+    # 確保 symptoms 是字典
+    if not isinstance(symptoms, dict):
+        symptoms = {}
     
     symptom_names = {
         "pain": "疼痛", "dyspnea": "呼吸困難", "cough": "咳嗽",
